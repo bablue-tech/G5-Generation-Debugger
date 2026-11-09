@@ -1,0 +1,14 @@
+{
+  "notes": "Parity fixture. The web engine and the Python engine must both produce these codes and confidence levels for the sample generations.",
+  "expected": {
+    "665f1e2a9b3c4d5e6f708192": { "code": "CREDITS.ORG_POOL_INSUFFICIENT", "confidence": "confirmed" },
+    "665f22b09b3c4d5e6f7081a4": { "code": "PROVIDER.OVERLOADED", "confidence": "probable" },
+    "665f1e2a9b3c4d5e6f708193": { "code": "STATUS.COMPLETED", "confidence": "confirmed" },
+    "665f30c49b3c4d5e6f7081f0": { "code": "STATUS.COMPLETED", "confidence": "confirmed" },
+    "665f41de9b3c4d5e6f708233": { "code": "JR.LOST_TRACK", "confidence": "probable" },
+    "665f52aa9b3c4d5e6f708301": { "code": "UNKNOWN", "confidence": "insufficient" },
+    "665f63bb9b3c4d5e6f708355": { "code": "INPUT.UNSUPPORTED_TYPE", "confidence": "probable" },
+    "665f85dd9b3c4d5e6f708377": { "code": "PROVIDER.RATE_LIMITED", "confidence": "probable" },
+    "665f74cc9b3c4d5e6f708366": { "code": "STATUS.IN_PROGRESS", "confidence": "confirmed" }
+  }
+}

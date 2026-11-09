@@ -1,0 +1,419 @@
+{
+  "version": 1,
+  "notes": "Single source of truth for failure classification. Read by both the web app (sample mode) and the Python service. Rules are checked in order; the first match wins and later matches are reported as other candidates. Regex captures are positional and named by the 'captures' list. Templates may use {placeholders} from captures or from computed facts (model, provider, duration, http_status, same_count, same_orgs).",
+  "rules": [
+    {
+      "code": "STATUS.IN_PROGRESS",
+      "category": "Still running",
+      "title": "Still running",
+      "tone": "neutral",
+      "confidence": "confirmed",
+      "stage": "none",
+      "owner": "nobody",
+      "retryable": "no",
+      "match": [
+        { "field": "status", "in": ["queued", "dispatching", "dispatched", "starting", "pending", "processing", "running", "checking", "retrying"] }
+      ],
+      "summary": "This generation hasn't failed. It's still being worked on ({status}).",
+      "cause": "The job is in progress. Long video jobs can take several minutes.",
+      "steps": [
+        "Keep this page open, or come back in a few minutes.",
+        "Don't generate again yet. A second run would spend credits twice."
+      ],
+      "recovery": { "label": "Nothing to fix yet", "tone": "good" },
+      "actions": ["open_generation"],
+      "credits": "Charged only if it completes."
+    },
+    {
+      "code": "STATUS.COMPLETED",
+      "category": "Not a failure",
+      "title": "Completed",
+      "tone": "good",
+      "confidence": "confirmed",
+      "stage": "none",
+      "owner": "nobody",
+      "retryable": "no",
+      "match": [
+        { "field": "status", "in": ["completed", "succeeded"] }
+      ],
+      "summary": "This wasn't a failure. The generation finished in {duration}.",
+      "cause": "If your screen showed \"Generation timed out\", it stopped waiting before the result arrived. Some screens give up after 5 minutes, but the job kept running.",
+      "steps": [
+        "Open the finished output.",
+        "Don't generate again, or you'll pay twice."
+      ],
+      "recovery": { "label": "Nothing to fix", "tone": "good" },
+      "actions": ["open_generation"],
+      "credits": "Charged once, for the completed output."
+    },
+    {
+      "code": "STOPPED.CANCELLED",
+      "category": "Cancelled",
+      "title": "Cancelled",
+      "tone": "neutral",
+      "confidence": "confirmed",
+      "stage": "none",
+      "owner": "nobody",
+      "retryable": "yes",
+      "match": [
+        { "field": "status", "in": ["canceled", "cancelled"] },
+        { "field": "notice_code", "in": ["generation_stopped", "turn_stopped"] }
+      ],
+      "summary": "This run was stopped before it finished.",
+      "cause": "It was cancelled, by a person or by the system, before an output was produced.",
+      "steps": ["If you still need it, open it with the same inputs and generate again."],
+      "recovery": { "label": "Safe to run again", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged for a stopped run."
+    },
+    {
+      "code": "CREDITS.ORG_POOL_INSUFFICIENT",
+      "category": "Credits",
+      "title": "Not enough workspace credits",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "credit_check",
+      "owner": "org_admin",
+      "retryable": "no",
+      "match": [
+        { "field": "error_text", "regex": "Insufficient credits\\. Required: ([0-9.]+), available: ([0-9.]+)(?: \\(source: ([a-z_]+)\\))?", "captures": ["required", "available", "source"] },
+        { "field": "notice_code", "in": ["insufficient_credits", "out_of_credits"] }
+      ],
+      "summary": "The run stopped at the credit check, before it reached the model. Nothing was generated.",
+      "cause": "This run needed {required} credits. The workspace credit pool had {available}.",
+      "cause_fallback": "The workspace didn't have enough credits for this run.",
+      "steps": [
+        "Ask an org admin to top up the workspace credit pool.",
+        "Or lower the duration or resolution to reduce the cost, then generate again."
+      ],
+      "recovery": { "label": "Needs an org admin", "tone": "warning" },
+      "actions": ["open_with_inputs", "escalate"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "CREDITS.NO_WORKSPACE",
+      "category": "Credits",
+      "title": "No workspace credits for this model",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "credit_check",
+      "owner": "user",
+      "retryable": "no",
+      "match": [{ "field": "notice_code", "in": ["needs_org_credits"] }],
+      "summary": "This model is paid for with workspace credits, and the run had no workspace with credits attached.",
+      "cause": "The generation wasn't linked to a workspace that can pay for this model.",
+      "steps": ["Switch to the right workspace (organization) and generate again.", "If you're unsure which one, ask your project lead."],
+      "recovery": { "label": "You can fix this", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "LIMIT.PERIOD_CAP",
+      "category": "Credits",
+      "title": "Usage allowance reached",
+      "tone": "warning",
+      "confidence": "confirmed",
+      "stage": "credit_check",
+      "owner": "org_admin",
+      "retryable": "later",
+      "match": [{ "field": "notice_code", "in": ["cap_reached"] }],
+      "summary": "Your usage allowance for this period has run out.",
+      "cause": "The allowance resets automatically. An admin can also allow runs to continue on credits.",
+      "steps": ["Wait for the allowance to reset.", "Or ask an org admin to turn on \"keep going on credits\"."],
+      "recovery": { "label": "Needs an org admin, or wait", "tone": "warning" },
+      "actions": ["escalate"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "ACCESS.ORG_DISABLED",
+      "category": "Access",
+      "title": "Workspace access disabled",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "submission",
+      "owner": "support",
+      "retryable": "no",
+      "match": [{ "field": "notice_code", "in": ["org_generation_disabled"] }],
+      "summary": "Generation is switched off for this workspace.",
+      "cause": "An administrator has disabled generation access for the workspace.",
+      "steps": ["Send this to the tech team so access can be checked and re-enabled."],
+      "recovery": { "label": "Needs the tech team", "tone": "serious" },
+      "actions": ["escalate"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "ACCESS.NO_PROJECT",
+      "category": "Access",
+      "title": "No access to this project",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "submission",
+      "owner": "org_admin",
+      "retryable": "no",
+      "match": [{ "field": "notice_code", "in": ["no_project_access", "switch_org"] }],
+      "summary": "You don't have access to the project or workspace this generation belongs to.",
+      "cause": "The run was blocked by project permissions.",
+      "steps": ["Ask a project member or org admin to add you.", "Or switch to the workspace that owns the project."],
+      "recovery": { "label": "Needs an org admin", "tone": "warning" },
+      "actions": ["escalate"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "INPUT.UNSUPPORTED_TYPE",
+      "category": "Input",
+      "title": "Unsupported file type",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "submission",
+      "owner": "user",
+      "retryable": "after_fix",
+      "match": [
+        { "field": "notice_code", "in": ["upload_unsupported_type"] },
+        { "field": "error_text", "regex": "Unsupported (?:video|image|audio|file) format:? ?([a-z0-9]+)?", "captures": ["format"], "confidence": "probable" }
+      ],
+      "summary": "One of the input files is in a format this model doesn't accept.",
+      "cause": "The file format wasn't accepted. For video, use MP4, MOV, WebM, M4V or GIF.",
+      "steps": ["Convert or replace the file with a supported format.", "Open with these inputs, swap the file, and generate again."],
+      "recovery": { "label": "You can fix this", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "INPUT.TOO_LARGE",
+      "category": "Input",
+      "title": "File too large",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "submission",
+      "owner": "user",
+      "retryable": "after_fix",
+      "match": [
+        { "field": "notice_code", "in": ["upload_too_large"] },
+        { "field": "error_text", "regex": "(?:file|upload|payload|image|video) (?:is )?too large|request entity too large", "confidence": "probable" }
+      ],
+      "summary": "One of the input files is larger than this model allows.",
+      "cause": "The upload was over the size limit.",
+      "steps": ["Compress or trim the file.", "Open with these inputs, replace the file, and generate again."],
+      "recovery": { "label": "You can fix this", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "INPUT.UPSTREAM_MISSING",
+      "category": "Input",
+      "title": "An earlier step didn't produce its output",
+      "tone": "critical",
+      "confidence": "probable",
+      "stage": "submission",
+      "owner": "user",
+      "retryable": "after_fix",
+      "match": [
+        { "field": "error_text", "regex": "upstream step did not produce output|Unresolved inputs" }
+      ],
+      "summary": "This step was skipped because a step it depends on failed first.",
+      "cause": "The real problem is in the earlier step. Fixing that one usually fixes this one too.",
+      "steps": ["Diagnose the first failed step in the plan.", "Run that step again, then this one."],
+      "recovery": { "label": "Fix the earlier step", "tone": "warning" },
+      "actions": ["escalate"],
+      "credits": "Not charged for a skipped step."
+    },
+    {
+      "code": "POLICY.CONTENT_GUARD",
+      "category": "Content check",
+      "title": "Blocked by a content check",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "submission",
+      "owner": "user",
+      "retryable": "after_fix",
+      "match": [
+        { "field": "notice_code", "in": ["seedance_guard"] },
+        { "field": "error_text", "regex": "content (?:policy|moderation)|safety (?:filter|system)|flagged by moderation|nsfw", "confidence": "probable" }
+      ],
+      "summary": "The prompt or a reference was blocked by a content check.",
+      "cause": "Something in the prompt or reference images triggered a safety or content rule.",
+      "steps": ["Rephrase the prompt or change the flagged reference.", "Open with these inputs and try again."],
+      "recovery": { "label": "You can fix this", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Usually not charged. Check your credit history if unsure."
+    },
+    {
+      "code": "PROVIDER.ACCOUNT_BALANCE",
+      "category": "Provider",
+      "title": "Model temporarily out of service",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "provider",
+      "owner": "platform",
+      "retryable": "no",
+      "match": [
+        { "field": "notice_code", "in": ["provider_out_of_credit"] },
+        { "field": "error_text", "regex": "(?:exhausted|insufficient|low) (?:account )?balance|billing hard limit|account (?:is )?suspended", "confidence": "probable" }
+      ],
+      "summary": "This model is out of service on our side for now. This is not about your credits.",
+      "cause": "The provider account behind {model} needs attention from the team.",
+      "steps": ["Try a different model for now.", "The team has been notified. Send it to the tech team if it's urgent."],
+      "recovery": { "label": "Needs the tech team", "tone": "serious" },
+      "actions": ["escalate"],
+      "credits": "Not charged."
+    },
+    {
+      "code": "PROVIDER.RATE_LIMITED",
+      "category": "Provider",
+      "title": "Model provider is rate limiting",
+      "tone": "critical",
+      "confidence": "probable",
+      "stage": "provider",
+      "owner": "provider",
+      "retryable": "later",
+      "match": [
+        { "field": "notice_code", "in": ["provider_rate_limited"], "confidence": "confirmed" },
+        { "field": "http_status", "in": [429] },
+        { "field": "error_text", "regex": "rate.?limit|too many requests" }
+      ],
+      "summary": "The model provider is getting too many requests right now and turned this one away.",
+      "cause": "{provider} returned a rate-limit response. Your inputs were fine.",
+      "steps": ["Wait a few minutes, then try again.", "Or try another model for this shot."],
+      "recovery": { "label": "Safe to retry later", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged for this attempt."
+    },
+    {
+      "code": "PROVIDER.OVERLOADED",
+      "category": "Provider",
+      "title": "Model provider overloaded",
+      "tone": "critical",
+      "confidence": "probable",
+      "stage": "provider",
+      "owner": "provider",
+      "retryable": "later",
+      "match": [
+        { "field": "notice_code", "in": ["provider_overloaded", "model_stalled"], "confidence": "confirmed" },
+        { "field": "error_text", "regex": "overloaded|at capacity|temporarily unavailable|queue (?:is )?full|service unavailable" },
+        { "field": "http_status", "in": [502, 503, 504], "confidence": "possible" }
+      ],
+      "summary": "Your request reached the model provider, which turned it down because it was over capacity. Your inputs were fine.",
+      "cause": "{provider} returned an overloaded or unavailable response.",
+      "steps": ["Wait 10 to 15 minutes, then try again.", "Or switch to a faster or different model for this shot."],
+      "recovery": { "label": "Safe to retry later", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged for this attempt."
+    },
+    {
+      "code": "MODEL.UNAVAILABLE",
+      "category": "Provider",
+      "title": "Model unavailable",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "provider",
+      "owner": "provider",
+      "retryable": "later",
+      "match": [{ "field": "notice_code", "in": ["model_unavailable"] }],
+      "summary": "This model isn't available to your workspace right now, or it's down.",
+      "cause": "{model} couldn't be used for this run.",
+      "steps": ["Try another model.", "Or try this one again in a little while."],
+      "recovery": { "label": "Try another model", "tone": "warning" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged."
+    },
+    {
+      "code": "JR.LOST_TRACK",
+      "category": "Job system",
+      "title": "Our job system lost track of this generation",
+      "tone": "critical",
+      "confidence": "probable",
+      "stage": "delivery",
+      "owner": "platform",
+      "retryable": "caution",
+      "match": [
+        { "field": "notice_code", "in": ["lease_expired", "orphan_detected", "owner_lost"] },
+        { "field": "error_text", "regex": "lease_expired|orphan_detected|owner_lost|lease (?:expired|lost)|never (?:got|received) the webhook" }
+      ],
+      "summary": "The provider started your generation, but our job system never received the result. This is a platform problem, not your input.",
+      "cause": "The job system stopped hearing back about this job. The provider may still have finished it, and that can't be confirmed from here yet.",
+      "steps": [
+        "Wait before retrying. The provider may already have produced, and charged for, the result.",
+        "If it fails again, send it to the tech team. The report is ready."
+      ],
+      "recovery": { "label": "Needs the tech team", "tone": "serious" },
+      "actions": ["escalate"],
+      "credits": "Unclear. The provider may have charged. The tech team can check."
+    },
+    {
+      "code": "JR.RESTART",
+      "category": "Job system",
+      "title": "Interrupted by a system update",
+      "tone": "warning",
+      "confidence": "probable",
+      "stage": "queue",
+      "owner": "platform",
+      "retryable": "yes",
+      "match": [
+        { "field": "notice_code", "in": ["replica_shutdown", "interrupted_by_restart"], "confidence": "confirmed" },
+        { "field": "error_text", "regex": "replica_shutdown|interrupted_by_restart|worker (?:restarted|shut ?down)" }
+      ],
+      "summary": "This run was interrupted while the system was being updated.",
+      "cause": "A routine restart stopped the job before it finished.",
+      "steps": ["Run it again. This is safe."],
+      "recovery": { "label": "Safe to run again", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Not charged for the interrupted run."
+    },
+    {
+      "code": "SUBMIT.ROUTER_UNREACHABLE",
+      "category": "Job system",
+      "title": "Couldn't reach the job system",
+      "tone": "critical",
+      "confidence": "probable",
+      "stage": "submission",
+      "owner": "platform",
+      "retryable": "later",
+      "match": [
+        { "field": "error_text", "regex": "jobrouter request error|connection attempts failed|ECONNREFUSED|ECONNRESET|Cannot reach jobrouter" }
+      ],
+      "summary": "The request couldn't be handed to the job system, so it never started.",
+      "cause": "The connection to the job system failed.",
+      "steps": ["Try again in a minute.", "If it keeps happening, send it to the tech team."],
+      "recovery": { "label": "Safe to retry later", "tone": "good" },
+      "actions": ["open_with_inputs", "escalate"],
+      "credits": "Not charged. Nothing ran."
+    },
+    {
+      "code": "TIMEOUT.SERVER_DEADLINE",
+      "category": "Timeout",
+      "title": "Took longer than the time limit",
+      "tone": "critical",
+      "confidence": "confirmed",
+      "stage": "provider",
+      "owner": "user",
+      "retryable": "after_fix",
+      "match": [
+        { "field": "notice_code", "in": ["poll_deadline_exceeded"] },
+        { "field": "error_text", "regex": "deadline exceeded|timed out after|exceeded (?:the )?time limit", "confidence": "probable" }
+      ],
+      "summary": "This run took longer than the time limit and was stopped.",
+      "cause": "Very long or complex requests can hit the limit.",
+      "steps": ["Try a shorter duration or a simpler request.", "Or split it into smaller parts."],
+      "recovery": { "label": "You can fix this", "tone": "good" },
+      "actions": ["open_with_inputs"],
+      "credits": "Check your credit history. Most timed-out runs aren't charged."
+    }
+  ],
+  "fallback": {
+    "code": "UNKNOWN",
+    "category": "Unknown",
+    "title": "Cause not determined",
+    "tone": "critical",
+    "confidence": "insufficient",
+    "stage": "unknown",
+    "owner": "engineering",
+    "retryable": "unknown",
+    "summary": "The generation failed, but the available evidence doesn't show why.",
+    "cause": "No rule matched the recorded error, so this needs a person. Rather than guess, a report has been prepared for the tech team.",
+    "steps": ["Send this to the tech team. Your IDs, timeline and this report are attached.", "Meanwhile, you can try a different model."],
+    "recovery": { "label": "Needs the tech team", "tone": "serious" },
+    "actions": ["escalate"],
+    "credits": "Unknown. It will be checked with the report."
+  },
+  "platform_notice_threshold": 5
+}
